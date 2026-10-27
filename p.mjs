@@ -43,8 +43,8 @@ function shouldSkipKey(raw) {
   if (key.includes("percent")) return true;
   if (key.includes("hours")) return true;
   if (key.includes("minute")) return true;
-  if (key.includes("month")) return true;
-  if (key.includes("limit")) return true;
+  if (key.includes("months")) return true;
+  if (key.includes("limit") && key !== "unlimited") return true;
   if (key.includes("count")) return true;
   if (
     ["bpm", "duration", "plays", "seed", "vat", "buffer", "priority", "tracks", "photos", "clips"].includes(
@@ -189,10 +189,69 @@ function doubleEuroStrings(text, stats) {
   });
 }
 
+function isMoneyKey(raw, includeBarePrice = true) {
+  const key = String(raw).replace(/^['"]|['"]$/g, "");
+  if (shouldSkipKey(key)) return false;
+  if (/^price$/i.test(key)) return includeBarePrice;
+  return /(?:Price|Euros|Cents|From)$/.test(key) || /^(?:lease|unlimited|exclusive)$/i.test(key);
+}
+
+function doubleMoneyKeys(text, protectedRanges, stats) {
+  const re = new RegExp(
+    String.raw`((?:["'][^"'\n]+["'])|(?:[A-Za-z_$][\w$]*))\s*:\s*${NUM}(?=\s*(?:[,}\n]|as\b|//))`,
+    "g",
+  );
+  const found = [];
+  let match;
+  while ((match = re.exec(text))) {
+    const key = String(match[1]).replace(/^['"]|['"]$/g, "");
+    if (/Cents$/.test(key) || !isMoneyKey(match[1], false) || inRange(match.index, protectedRanges)) continue;
+    found.push({ index: match.index, full: match[0], num: match[2], key: match[1] });
+  }
+  let out = text;
+  for (const item of found.reverse()) {
+    const value = parseNum(item.num);
+    if (!Number.isFinite(value) || value === 0) continue;
+    const rendered = formatNum(value * 2);
+    out = out.slice(0, item.index) + replaceNumber(item.full, item.num, rendered) + out.slice(item.index + item.full.length);
+    stats.objectValues.push(`${item.key}: ${item.num} -> ${rendered}`);
+  }
+  return out;
+}
+
+function doubleMoneyCalls(text, stats) {
+  return text.replace(
+    /\b(formatMoneyFromEuros|formatMoney)\s*\(\s*(\d+(?:_\d+)*(?:\.\d+)?)(?=\s*[,)])/g,
+    (match, name, num) => {
+      const value = parseNum(num);
+      if (!Number.isFinite(value) || value === 0) return match;
+      if (name === "formatMoney" && value < 100) return match;
+      const rendered = formatNum(value * 2);
+      stats.prices.push(`${name}(${num}) -> ${rendered}`);
+      return replaceNumber(match, num, rendered);
+    },
+  );
+}
+
+function doubleMoneyConsts(text, stats) {
+  return text.replace(
+    /\b(?:const|let)\s+([A-Za-z_$][\w$]*(?:Price|Euros|From|Cents))\b(?:\s*:[^=]{0,160})?\s*=\s*(\d+(?:_\d+)*)(?=\s*[;,\n])/g,
+    (match, name, num) => {
+      if (shouldSkipKey(name)) return match;
+      const value = parseNum(num);
+      if (!Number.isFinite(value) || value === 0) return match;
+      const rendered = formatNum(value * 2);
+      stats.objectValues.push(`${name} = ${num} -> ${rendered}`);
+      return replaceNumber(match, num, rendered);
+    },
+  );
+}
+
 function doubleJsonMoney(text, stats) {
   return text.replace(
-    /("(?:lease|unlimited|exclusive|price|priceCents|monthlyPriceCents)")\s*:\s*(\d+(?:_\d+)*(?:\.\d+)?)(?=\s*[,}\n])/g,
+    /("(?:[^"\\\n]+)")\s*:\s*(\d+(?:_\d+)*(?:\.\d+)?)(?=\s*[,}\n])/g,
     (match, key, num) => {
+      if (!isMoneyKey(key)) return match;
       const value = parseNum(num);
       if (!Number.isFinite(value) || value === 0) return match;
       const rendered = formatNum(value * 2);
@@ -362,6 +421,9 @@ function patchCode(text, stats) {
   next = doubleBareCents(next, findNamedObjects(next), stats);
   next = doubleLoosePrices(next, findNamedObjects(next), stats);
   next = doublePriceFallbacks(next, findNamedObjects(next), stats);
+  next = doubleMoneyKeys(next, findNamedObjects(next), stats);
+  next = doubleMoneyCalls(next, stats);
+  next = doubleMoneyConsts(next, stats);
   return doubleEuroStrings(next, stats);
 }
 
@@ -492,6 +554,13 @@ const addons = [
 ];
 const raw = { id: "legacy", priceCents: 1000, durationMinutes: 30 };
 export const MEMBER = { monthlyPriceCents: eur(59), minMonths: 1, studioHours: 4, engineerHoursMax: 2, discountPercent: 10 };
+export const contentPlans = [
+  { id: "content-start", monthlyPrice: 249, monthlyPriceCents: eur(249), hoursPerMonth: 1, discountPercent: 5 },
+];
+const coverFrom = 35;
+const recordingCard = { fixedPrice: 75, unit: "from (studio rental)" };
+const shown = formatMoneyFromEuros(15);
+const shownCents = formatMoney(1500);
 export const COPY = "Standard (€100), Unlimited (€200). Extra hour €40 per uur. Cost €450. Licentie (€150) of exclusief (€500).";
 export const TERMS = { freeCancelHours: 24, lateCancelPercent: 50, noShowPercent: 100, bufferMinutes: 15, holdMinutes: 10 };
 const note = "priceRange \\"€€\\"";
@@ -550,6 +619,13 @@ const note = "priceRange \\"€€\\"";
   assertIncludes(out, "durationMinutes: 30", "legacy duration");
   assertIncludes(out, "minutes: 60, label: \"Content Mini\", price: 300", "package card");
   assertIncludes(out, "monthlyPriceCents: eur(118)", "membership");
+  assertIncludes(out, "monthlyPrice: 498", "content monthly");
+  assertIncludes(out, "monthlyPriceCents: eur(498)", "content cents");
+  assertIncludes(out, "hoursPerMonth: 1", "content hours");
+  assertIncludes(out, "const coverFrom = 70", "cover const");
+  assertIncludes(out, "fixedPrice: 150", "fixed price");
+  assertIncludes(out, "formatMoneyFromEuros(30)", "format euros");
+  assertIncludes(out, "formatMoney(3000)", "format cents");
   assertIncludes(out, "minMonths: 1", "min months");
   assertIncludes(out, "studioHours: 4", "studio hours");
   assertIncludes(out, "engineerHoursMax: 2", "engineer hours");
