@@ -24,7 +24,7 @@ const SKIP_DIRS = new Set([
 ]);
 const CODE_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs"]);
 const CLOSED = "SuTopia ticket sales are closed.";
-const SALES_PAGE = /\/events\/sutopia\/page\.tsx$/;
+const SALES_PAGE = /\/events\/sutopia\/page\.(tsx|jsx|ts|js)$/;
 
 function walk(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
@@ -414,6 +414,12 @@ for (const file of files) {
 
 const after = walk(root).filter((file) => path.resolve(file) !== selfPath);
 const problems = remainingSales(after);
+const sutopiaFiles = after.filter((file) => file.split(path.sep).join("/").includes("/sutopia"));
+fs.mkdirSync(path.join(root, "public"), { recursive: true });
+fs.writeFileSync(
+  path.join(root, "public", "sutopia-files.txt"),
+  sutopiaFiles.map((file) => path.relative(root, file)).sort().join("\n") + "\n",
+);
 const alreadyClosed = after.some((file) => fs.readFileSync(file, "utf8").includes(CLOSED));
 console.log(
   `SuTopia sales patch: ${changed} file(s); sections ${totals.sections}, links ${totals.links}, checkout ${totals.checkout}, page ${totals.page}`,
