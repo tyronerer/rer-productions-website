@@ -44,7 +44,7 @@ function shouldSkipKey(raw) {
   if (key.includes("hours")) return true;
   if (key.includes("minute")) return true;
   if (key.includes("months")) return true;
-  if (key.includes("limit") && key !== "unlimited") return true;
+  if (key.includes("limit") && !key.includes("unlimited")) return true;
   if (key.includes("count")) return true;
   if (
     ["bpm", "duration", "plays", "seed", "vat", "buffer", "priority", "tracks", "photos", "clips"].includes(
@@ -526,6 +526,8 @@ export const bookingPriceCents = {
   studioWithoutEngineerHourly: 1500,
   studioWithEngineerHourly: 4_000,
   customBeatExclusive: 30000,
+  customBeatUnlimited: 20000,
+  revisionLimit: 1,
   artistDay: 44900,
   artistDayIncludedHours: 8,
   extraRevision: 2500,
@@ -586,6 +588,8 @@ const note = "priceRange \\"€€\\"";
   assertIncludes(out, "studioWithoutEngineerHourly: 3000", "hourly cents");
   assertIncludes(out, "studioWithEngineerHourly: 8000", "engineer cents");
   assertIncludes(out, "customBeatExclusive: 60000", "exclusive cents");
+  assertIncludes(out, "customBeatUnlimited: 40000", "unlimited cents");
+  assertIncludes(out, "revisionLimit: 1", "revision limit");
   assertIncludes(out, "artistDay: 89800", "artist day cents");
   assertIncludes(out, "artistDayIncludedHours: 8", "included hours");
   assertIncludes(out, "extraRevision: 5000", "extra revision cents");
