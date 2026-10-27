@@ -25,6 +25,7 @@ const SKIP_DIRS = new Set([
 const CODE_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs"]);
 const CLOSED = "SuTopia ticket sales are closed.";
 const SALES_PAGE = /\/events\/sutopia\/page\.(tsx|jsx|ts|js)$/;
+const SALES_PAGE_MARKER = "sutopia-sales-removed";
 
 function walk(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
@@ -335,6 +336,7 @@ function patchCheckout(text) {
 function salesPageSource() {
   return `import { notFound } from "next/navigation";
 
+// ${SALES_PAGE_MARKER}
 export default function Page() {
   notFound();
 }
@@ -348,7 +350,7 @@ function isSalesPage(file) {
 function patchFile(file, text) {
   const stats = { sections: 0, links: 0, checkout: 0, page: 0 };
   if (isSalesPage(file)) {
-    if (!text.includes('notFound();') || text.includes("SutopiaCheckoutForm") || text.includes('id="sutopia"')) {
+    if (!text.includes(SALES_PAGE_MARKER)) {
       stats.page = 1;
       return { text: salesPageSource(), stats };
     }
@@ -380,7 +382,7 @@ function remainingSales(files) {
     const text = fs.readFileSync(file, "utf8");
     const rel = file.split(path.sep).join("/");
     if (isSalesPage(file)) {
-      if (!text.includes("notFound()")) problems.push(`${rel} still sells`);
+      if (!text.includes(SALES_PAGE_MARKER)) problems.push(`${rel} still sells`);
       continue;
     }
     if (/(?:^|\s)id\s*=\s*["']sutopia["']/.test(text)) problems.push(`${rel} still has the ticket section`);
@@ -414,12 +416,6 @@ for (const file of files) {
 
 const after = walk(root).filter((file) => path.resolve(file) !== selfPath);
 const problems = remainingSales(after);
-const sutopiaFiles = after.filter((file) => file.split(path.sep).join("/").includes("/sutopia"));
-fs.mkdirSync(path.join(root, "public"), { recursive: true });
-fs.writeFileSync(
-  path.join(root, "public", "sutopia-files.txt"),
-  sutopiaFiles.map((file) => path.relative(root, file)).sort().join("\n") + "\n",
-);
 const alreadyClosed = after.some((file) => fs.readFileSync(file, "utf8").includes(CLOSED));
 console.log(
   `SuTopia sales patch: ${changed} file(s); sections ${totals.sections}, links ${totals.links}, checkout ${totals.checkout}, page ${totals.page}`,
